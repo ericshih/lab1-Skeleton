@@ -16,14 +16,178 @@ command_stream_t proc_Buf_caller(char** buf);
 command_t process_buffer(char* buf);
 void end_word(bool* input_flag, bool* output_flag, command_t entry,
 	      char* subset, int* word_count); 
+bool analyze_token(char* token); //returns false if token ends with special 
+				 //characters, e.g. a ||
+void output_error(char* buffer, char* token, int pos); 
+//outputs error with line number found at token
+
 
 struct command_stream
 {
   command_t* my_commands;
-
+  int next_pos;
+  int size;
   //int (*func) (void*); //function pointer
   //void* v;	       //void *
 };
+
+void output_error(char* buffer, char* token, int pos)
+{
+  char* start = buffer;
+  int i =0;
+
+  int line_num = 1;
+  if(pos == 0)
+  {
+	while(buffer[i] != '\0')
+	{   
+	   if(buffer[i]=='\n')
+	     line_num++;
+	   else if(buffer[i]=='\0')
+	     break;
+  	   //printf("%d %d\n",(int) buffer[i] , line_num);
+	   i++;
+	}
+	error(1,0,"%d : Syntax Error", line_num-1);
+	
+  }
+  pos = -pos -2;
+
+  // Set problem to first instance of token in buf
+  char * problem = strstr(buffer, token);
+  char * token_orig = checked_malloc(sizeof(char *));
+  strcpy(token_orig, token);
+  // If we don't find anything (there are supposed to be newlines in the middle of the token
+  char* mod_buf = checked_malloc(sizeof(char*));
+  char error_char;
+  while(problem == NULL && strlen(token) > 0)
+  {
+    // Keep deleting last char of the token until we find a match
+    token[strlen(token)-1] = '\0';
+    problem = strstr(buffer, token);
+  }
+do
+{
+  // printf("%d\n", strlen(token));
+
+  error_char = token_orig[pos];
+  // printf("%c\n", error_char);
+  int mod_pos = 0;
+  int problem_pos = 0;
+  int temp_pos = pos;
+  //printf("%d\n", temp_pos);
+  //printf("%c\n", problem[0]);
+  while(problem[0] != '\n' && problem != start)
+  {
+    //printf("%c\t%c\t",problem[0], start[0]);
+    //printf("%s\n", "inside");
+    problem--;
+  }
+  if(problem[0]=='\n')
+     problem++;
+  for(problem_pos=0; problem_pos< temp_pos+1; problem_pos++)
+  {
+    //printf("%s", "In for loop.");
+    if(problem[problem_pos] != '\n')
+    {
+      mod_buf[mod_pos] = problem[problem_pos];
+      mod_pos++;
+    }
+    else
+      temp_pos++;
+  }
+  mod_buf[mod_pos] = '\0';
+  //printf("mod_buf: %s\n", mod_buf);
+  //printf("pos: %d\n", pos);
+  //printf("char: %c\n%c\n", mod_buf[pos], error_char);
+  if(mod_buf[pos] == error_char)
+  {
+	//printf("%s\n", "Correct Instance");
+	break;
+  }
+  //printf("%s\n", "Wrong Instance");
+  while(problem[0] != '\n')
+    problem++;
+  problem++;
+  problem = strstr(problem, token); 
+} 
+while(mod_buf[pos] != error_char);
+ // If it is the wrong instance of token or a substring of token, we need to continue with the next match
+  // To check if it is the wrong instance, compare token with a buffer-token stripped of newlines and see if it matches
+  // 
+  /*char* line = strtok(buffer, "\n"); 
+
+  while(strstr(token, line) == NULL)
+  {
+  	printf("%s\n", line);
+        line = strtok(NULL, "\n"); 
+	if(*line == '\0') 
+ 	line_num++;
+  }
+  printf("%d\n", pos);
+  while((unsigned) pos >= strlen(line))
+  {
+	printf("%d\n",strlen(line));
+	pos -= strlen(line);
+	line_num++;
+	line = strtok(NULL, "\n");
+	
+  }
+  printf("%d\n",strlen(line));
+  printf("%d\n", pos); 
+  */
+   // We are at the at beginning of buffer counting newlines before the first instance of token in buf.
+  while(buffer != problem)
+  {
+	if(*buffer == '\n')
+	   line_num++;
+	buffer++;
+  }
+  int j;
+  // Up until we get to the position where we found the error, we check for newlines to add to the count
+  for(j=0; j<pos; j++)
+  {
+    if(buffer[j] == '\n')
+    {
+        line_num++;
+	pos++;
+    }
+  }
+  error(1,0,"%d : Syntax Error", line_num);
+
+}
+
+// Checks to see if token is a complete command, return false if next line is needed
+bool analyze_token(char* token)
+{
+	bool non_special = true;
+	int depth = 0;
+	int index = 0;
+	char ch = token[index];
+	while(ch != '\0')
+	{
+		if(ch == '(')
+			depth++;
+		else if(ch == ')')
+			depth--;
+		else if(ch == '|' || ch == '&' || ch == ';')
+			non_special = false;
+		else if(ch == ' ')
+		{}  
+		else
+			non_special = true;
+		index++;
+		ch = token[index];
+	}
+	
+	if(depth <= 0)
+	{	
+	//	printf("%s\n", token);
+    		return non_special;
+	}	
+	else
+	    return false;
+}
 
 command_stream_t
 make_command_stream (int (*get_next_byte) (void *),
@@ -43,43 +207,61 @@ make_command_stream (int (*get_next_byte) (void *),
   }
   
   buf[i] = '\0';
+  char* err_buf = checked_malloc(size);
+  strcpy(err_buf, buf);
   //printf("%s\n", buf);
   // char delimiters  = 'a';
   char* token = strtok(buf, "\n"); 
   size = 1000;
   i = 0;
   // printf("here\n");
-  char** set_of_tokens = checked_malloc(size);
- 
+  command_stream_t result = checked_malloc(sizeof(command_stream_t));
+  result->my_commands = checked_malloc(size);
+  result->size = 0;
+  result->next_pos = 0;
 
   while(token != NULL)
   {
-     if(i >= size)
-	checked_grow_alloc(set_of_tokens, &size);
-     
-     set_of_tokens[i] = token;
-  //   printf("%s\n", token);
-     token = strtok(NULL, "\n"); 
-     i++;
-
-  }
-  size_t j =0;
-  printf("%d", i);
-
-  command_stream_t result = checked_malloc(sizeof(command_stream_t));
-  result->my_commands = checked_malloc(size);
-  //int command_count=0;
-  for(j =0; j < i; j++)
-  {
-  	printf("Token %d: %s\n",j, set_of_tokens[j]);
-/*  	result->my_commands[command_count] = process_buffer(set_of_tokens[j]); 
-	if(result->my_commands[command_count] != NULL)
+    
+     //printf("%s\n", token);
+     if(analyze_token(token))
+     {	
+        //printf("%s\n", token);
+  	result->my_commands[result->size] = process_buffer(token);
+	//printf("Finished: %s\n", token);
+	if(result->my_commands[result->size] == NULL)
+	{}
+	else if(result->my_commands[result->size]->status <= -2)
 	{
-	   print_command(result->my_commands[command_count]);
-	   command_count++;
+	   // printf("BUF: %s\n", err_buf);
+	   output_error(err_buf, token,
+			result->my_commands[result->size]->status);
+	}
+	else
+	{
+	// print_command(result->my_commands[command_count]);
+           result->size++;
         }
-*/  }
+        token = strtok(NULL, "\n"); 
+     //   printf("%s\n", token);
+     }
+     else
+     {
+       // printf("%s\n", token);
+	char *temp = strtok(NULL, "\n");
+	//printf("NEXT TOKEN: %s\n", temp);
+	if(temp!=NULL)
+	{
+		strcat(token,temp);
+        //	printf("%s\n", token);
+	}
+	else
+	   output_error(err_buf, token,0);
+     }
+  }
 
+
+/*ONE COMMAND TESTING PURPOSES ONLY
   command_t e1 =  process_buffer(set_of_tokens[0]);
   if(e1==NULL)
   {
@@ -90,20 +272,22 @@ make_command_stream (int (*get_next_byte) (void *),
   print_command(e1);
   // while(e1->u.word[index] != NULL)
   result->my_commands[0] = e1;
-
+*/
   return result;
+
 }
 
 command_t process_buffer(char* buf)
 {
   size_t i=0;
-  int line = 0;
+  //int line = 0;
   int depth = 1;
   bool input_flag = false;  // if < sign found, flag is true until input name is 			      parsed
   bool output_flag = false; // if > sign found, flag is true until output name  			       is parsed
   bool subshell_flag = false;
   char* subset = checked_malloc(1000);
   command_t entry = checked_malloc(sizeof(struct command));
+  entry->status = 0;
   command_t complex_entry = checked_malloc(sizeof(struct command));
  // command_t subshell_entry = checked_malloc(sizeof(struct command));
 //  if(entry != NULL)
@@ -112,7 +296,8 @@ command_t process_buffer(char* buf)
 
   while(buf[i]!='\0')
   {
-    printf("%c %d\n",buf[i], i);
+  //  printf("%d\n", i);
+  //  printf("%c %d\n",buf[i], i);
     switch(buf[i])
     {
 	case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g':
@@ -146,13 +331,15 @@ command_t process_buffer(char* buf)
 		char ch[2];
 		ch[0] = buf[i];
 		ch[1] = '\0';
-		printf("\t Character to be added: %s\n", ch);
+		//printf("\t Character to be added: %s\n", ch);
 		strcat(subset, ch);
 		i++;
 		break;
 		
 	}
+	// Case dealing with subshells and white space at beginning of next line not implemented yet
         case ' ':
+	case '\t':	
 	{
 		if(subshell_flag)
 		{
@@ -165,8 +352,6 @@ command_t process_buffer(char* buf)
 	}
 	case ';': 
 	{
-	//	printf("semicolon found"); 
-		
 		if(subshell_flag)
 		{
 			i++;
@@ -177,22 +362,17 @@ command_t process_buffer(char* buf)
 		complex_entry->status = -1;
 		complex_entry->input = NULL;
 		complex_entry->output = NULL;
-
-		
 		complex_entry->u.command[0] = entry; 
-
-	//	complex_entry->u.command[0] = 
-	//		checked_malloc(sizeof(struct command));
-
-	//	memcpy(complex_entry->u.command[0], entry,
-	//		sizeof(struct command));
-
-	//	complex_entry->u.command[1] = 
-	//		checked_malloc(sizeof(struct command));
-
+		if(complex_entry->u.command[0]->status != -1)
+		{
+			complex_entry->status = -2 - i;
+			return complex_entry;
+		}
 		complex_entry->u.command[1] = process_buffer(&buf[i+1]); 
-	//	memcpy(complex_entry->u.command[1], process_buffer(&buf[i+1]), 
-	//		sizeof(struct command));
+		if(complex_entry->u.command[1] == NULL || 
+                   complex_entry->u.command[1]->status <= -2)
+			complex_entry->status = 
+				complex_entry->u.command[1]->status - i - 1;
 		return complex_entry;
 	}
 	case '|':
@@ -212,11 +392,26 @@ command_t process_buffer(char* buf)
 		complex_entry->input = NULL;
 		complex_entry->output = NULL;
 		complex_entry->u.command[0] = entry; 
+		if(complex_entry->u.command[0]->status != -1)
+		{
+			complex_entry->status = -2 - i;
+			return complex_entry;
+		}
 		complex_entry->u.command[1] = process_buffer(&buf[i+2]); 
+		if(complex_entry->u.command[0]->status != -1 || 
+		   complex_entry->u.command[1] == NULL || 
+                   complex_entry->u.command[1]->status <= -2)
+			complex_entry->status = 
+				complex_entry->u.command[1]->status - i - 1;
+		/*if(complex_entry->u.command[1] != NULL &&
+		   complex_entry->u.command[1]->status <= -2)
+			complex_entry->status =
+				complex_entry->u.command[1]->status - i - 1 - 1 */
 		return complex_entry;
 		}
 		else if(buf[i+1] == '\0')
 		{
+			
 		}
 		else
 		{
@@ -225,7 +420,20 @@ command_t process_buffer(char* buf)
 		complex_entry->input = NULL;
 		complex_entry->output = NULL;
 		complex_entry->u.command[0] = entry; 
+		if(complex_entry->u.command[0]->status != -1)
+		{
+			complex_entry->status = -2 - i;
+			return complex_entry;
+		}
 		complex_entry->u.command[1] = process_buffer(&buf[i+1]); 
+		if(complex_entry->u.command[1] == NULL || 
+                   complex_entry->u.command[1]->status <= -2)
+			complex_entry->status = 
+				complex_entry->u.command[1]->status - i - 1;
+		/*if(complex_entry->u.command[1] != NULL &&
+		   complex_entry->u.command[1]->status <= -2)
+			complex_entry->status = 
+				complex_entry->u.command[1]->status - i - 1;*/
 		return complex_entry;
 		}
 		break;
@@ -238,7 +446,11 @@ command_t process_buffer(char* buf)
 			break;
 		}
 		if(buf[i+1] != '&')// && Case
-			error(1,0,"%d : Syntax Error &&", line);
+		{
+			entry->status = -2 - i;
+			//printf("here");
+			return entry;
+		}//	error(1,0,"%d : Syntax Error &&", line);
 		
 		end_word(&input_flag, &output_flag, entry, subset, &word_count);
 		complex_entry->type = AND_COMMAND;
@@ -246,7 +458,19 @@ command_t process_buffer(char* buf)
 		complex_entry->input = NULL;
 		complex_entry->output = NULL;
 		complex_entry->u.command[0] = entry; 
+		if(complex_entry->u.command[0]->status != -1)
+		{
+			complex_entry->status = -2 - i;
+			return complex_entry;
+		}
 		complex_entry->u.command[1] = process_buffer(&buf[i+2]); 
+		if(complex_entry->u.command[1] != NULL &&
+		    complex_entry->u.command[1]->status <= -2)
+		{		
+		complex_entry->status = 
+			complex_entry->u.command[1]->status - i - 1 - 1;
+	//subtract previous offset with current position, 1 for recursion, 1 for 	  && being 2 characters
+		}
 		return complex_entry;	
 	}
 	case '(': 
@@ -258,15 +482,25 @@ command_t process_buffer(char* buf)
 		}
 		else
 		{
-	//	entry = checked_malloc(sizeof(struct command));
-		entry->type = SUBSHELL_COMMAND;
-		entry->status = -1; // Unknown  
-		entry->input = NULL;
-		entry->output = NULL;
-		entry->u.subshell_command = process_buffer(&buf[i+1]);
-		//	checked_malloc(sizeof(struct command));
-		i++;
-		subshell_flag = true;
+	//	  entry = checked_malloc(sizeof(struct command));
+		  entry->type = SUBSHELL_COMMAND;
+		  entry->status = -1; // Unknown  
+		  entry->input = NULL;
+		  entry->output = NULL;
+		  entry->u.subshell_command = process_buffer(&buf[i+1]);
+		  if(entry->u.subshell_command != NULL &&
+		     entry->u.subshell_command->status <= -2)
+		  {
+			entry->status = entry->u.subshell_command->status-i-1;
+			return entry;
+		  }//	checked_malloc(sizeof(struct command));
+		  else if(entry->u.subshell_command->status != -1)
+		  {
+			entry->status = -2-i-1;
+			return entry;
+		  }
+		  i++;
+		  subshell_flag = true;
 		}
 		break;
 	}
@@ -288,7 +522,11 @@ command_t process_buffer(char* buf)
 		{
 			end_word(&input_flag, &output_flag, entry, 
 				subset, &word_count);
-		  	return entry;
+		  	if(entry->status != -1)
+			{
+				entry->status = -2-i;
+			}
+			return entry;
 		}
 	}
 	case '<':
@@ -298,8 +536,12 @@ command_t process_buffer(char* buf)
 			i++;
 			break;
 		}
-		if(input_flag)
-		   error(1,0,"%d : Syntax Error <", line);
+		if(input_flag) 
+		{
+		   entry->status = -2-i;
+		   return entry;
+		}   
+		   //error(1,0,"%d : Syntax Error <", line);
  			
 		end_word(&input_flag, &output_flag, entry, subset, &word_count);
 		input_flag = true;
@@ -314,7 +556,10 @@ command_t process_buffer(char* buf)
 			break;
 		}
 		if(output_flag)
-		   error(1,0,"%d : Syntax Error >", line);
+		{
+		   entry->status = -2-i;
+		   return entry;
+		}   
  		
 		end_word(&input_flag, &output_flag, entry, subset, &word_count);
 		output_flag = true;
@@ -326,17 +571,11 @@ command_t process_buffer(char* buf)
 	{
 		return NULL;
 	}
-	case '\t':	
-	
-		break;
-	case '\n':
-	{
-		line++;
-		return NULL;
-		break;
-	}
 	default:
-		error(1,0,"%d : Syntax Error, Invalid Char %c", line, buf[i]);
+	{	
+		entry->status = -2-i;
+		return entry;
+	}	//error(1,0,"%d : Syntax Error, Invalid Char %c", line, buf[i]);
 	
     }
   }  
@@ -344,6 +583,9 @@ command_t process_buffer(char* buf)
 //  printf("Word 1: %s\n", entry->u.word[0]);
  // entry->u.word[word_count] = subset; 
   end_word(&input_flag, &output_flag, entry, subset, &word_count);
+  if((input_flag && entry->input == NULL) || 
+	(output_flag && entry->output == NULL))
+	entry->status = -2 - i + 1;
   return entry;
 
 }
@@ -376,9 +618,9 @@ void end_word(bool* input_flag, bool* output_flag, command_t entry,
 		   strcpy(entry -> u.word[*word_count], subset);
 		   (*word_count)++;
 		}
-		printf("word 0: %s\n", entry->u.word[0]);
-		printf("word 1: %s\n", entry->u.word[1]);
-		printf("word 2: %s\n", entry->u.word[2]);
+		//printf("word 0: %s\n", entry->u.word[0]);
+		//printf("word 1: %s\n", entry->u.word[1]);
+		//printf("word 2: %s\n", entry->u.word[2]);
 		subset[0] = '\0';
 
 	//	printf("subset: %s\n", subset);
@@ -399,9 +641,9 @@ void end_word(bool* input_flag, bool* output_flag, command_t entry,
 command_t
 read_command_stream (command_stream_t s)
 {
-  s=s;  
-  
-  /* FIXME: Replace this with your implementation too.  */
-  error (1, 0, "command reading not yet implemented");
-  return 0;
+  if(s->next_pos == s->size)
+    return NULL;
+  command_t temp = s->my_commands[s->next_pos];
+  s->next_pos++;
+  return temp;
 }
