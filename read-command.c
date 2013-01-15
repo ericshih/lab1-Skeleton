@@ -19,6 +19,8 @@ void end_word(bool* input_flag, bool* output_flag, command_t entry,
 bool analyze_token(char* token); //returns false if token ends with special 
 				 //characters, e.g. a ||
 void output_error(char* buffer, char* token, int pos); 
+
+void reorder_commands(command_stream_t s);
 //outputs error with line number found at token
 
 
@@ -66,15 +68,22 @@ void output_error(char* buffer, char* token, int pos)
     token[strlen(token)-1] = '\0';
     problem = strstr(buffer, token);
   }
+
+// While we have not found the correct instance of token in buffer
 do
 {
+  // If it is the wrong instance of token or a substring of token, 
+  // we need to continue with the next match
+  // To check if it is the wrong instance, 
+  // compare token with a buffer-token stripped of newlines and see if it matches
+
+
   // printf("%d\n", strlen(token));
 
   error_char = token_orig[pos];
-  // printf("%c\n", error_char);
-  int mod_pos = 0;
-  int problem_pos = 0;
-  int temp_pos = pos;
+  int mod_pos = 0; // The position we are writing to
+  int problem_pos = 0; // The position we are reading from
+  int temp_pos = pos; // Temp created to not mess with pos
   //printf("%d\n", temp_pos);
   //printf("%c\n", problem[0]);
   while(problem[0] != '\n' && problem != start)
@@ -112,9 +121,7 @@ do
   problem = strstr(problem, token); 
 } 
 while(mod_buf[pos] != error_char);
- // If it is the wrong instance of token or a substring of token, we need to continue with the next match
-  // To check if it is the wrong instance, compare token with a buffer-token stripped of newlines and see if it matches
-  // 
+
   /*char* line = strtok(buffer, "\n"); 
 
   while(strstr(token, line) == NULL)
@@ -398,16 +405,14 @@ command_t process_buffer(char* buf)
 			return complex_entry;
 		}
 		complex_entry->u.command[1] = process_buffer(&buf[i+2]); 
-		if(complex_entry->u.command[0]->status != -1 || 
-		   complex_entry->u.command[1] == NULL || 
-                   complex_entry->u.command[1]->status <= -2)
-			complex_entry->status = 
-				complex_entry->u.command[1]->status - i - 1;
+		if(complex_entry->u.command[1] == NULL || 
+        complex_entry->u.command[1]->status <= -2)
+			complex_entry->status = complex_entry->u.command[1]->status - i - 1;
 		/*if(complex_entry->u.command[1] != NULL &&
 		   complex_entry->u.command[1]->status <= -2)
 			complex_entry->status =
 				complex_entry->u.command[1]->status - i - 1 - 1 */
-		return complex_entry;
+		  return complex_entry;
 		}
 		else if(buf[i+1] == '\0')
 		{
@@ -415,26 +420,26 @@ command_t process_buffer(char* buf)
 		}
 		else
 		{
- 		complex_entry->type = PIPE_COMMAND;
-		complex_entry->status = -1;
-		complex_entry->input = NULL;
-		complex_entry->output = NULL;
-		complex_entry->u.command[0] = entry; 
-		if(complex_entry->u.command[0]->status != -1)
-		{
-			complex_entry->status = -2 - i;
-			return complex_entry;
-		}
-		complex_entry->u.command[1] = process_buffer(&buf[i+1]); 
-		if(complex_entry->u.command[1] == NULL || 
-                   complex_entry->u.command[1]->status <= -2)
-			complex_entry->status = 
-				complex_entry->u.command[1]->status - i - 1;
-		/*if(complex_entry->u.command[1] != NULL &&
-		   complex_entry->u.command[1]->status <= -2)
-			complex_entry->status = 
-				complex_entry->u.command[1]->status - i - 1;*/
-		return complex_entry;
+   		complex_entry->type = PIPE_COMMAND;
+  		complex_entry->status = -1;
+  		complex_entry->input = NULL;
+  		complex_entry->output = NULL;
+  		complex_entry->u.command[0] = entry; 
+  		if(complex_entry->u.command[0]->status != -1)
+  		{
+  			complex_entry->status = -2 - i;
+  			return complex_entry;
+  		}
+  		complex_entry->u.command[1] = process_buffer(&buf[i+1]); 
+  		if(complex_entry->u.command[1] == NULL || 
+                     complex_entry->u.command[1]->status <= -2)
+  			complex_entry->status = 
+  				complex_entry->u.command[1]->status - i - 1;
+  		/*if(complex_entry->u.command[1] != NULL &&
+  		   complex_entry->u.command[1]->status <= -2)
+  			complex_entry->status = 
+  				complex_entry->u.command[1]->status - i - 1;*/
+  		return complex_entry;
 		}
 		break;
 	}
@@ -638,12 +643,36 @@ void end_word(bool* input_flag, bool* output_flag, command_t entry,
   //error (1, 0, "command reading not yet implemented");
   //return 0;
 
-command_t
-read_command_stream (command_stream_t s)
+command_t read_command_stream (command_stream_t s)
 {
   if(s->next_pos == s->size)
     return NULL;
+  else if(s->my_commands[s->next_pos]->type != SIMPLE_COMMAND)
+    reorder_commands(s);
   command_t temp = s->my_commands[s->next_pos];
   s->next_pos++;
   return temp;
+}
+
+void reorder_commands(command_stream_t s)
+{
+  // Reorder tree
+  command_t temp = s->my_commands[s->next_pos];
+  // printf("Before: \n");
+  // print_command(temp);
+
+  // while
+  while(temp->u.command[1] != NULL && temp->u.command[1]->type != SIMPLE_COMMAND)
+  {
+    command_t new_right = temp->u.command[1]->u.command[0]; 
+    command_t new_left = temp->u.command[0];
+    command_t new_entry = temp;
+    temp = temp->u.command[1];
+    // new_entry->u.command[0] = new_left;
+    new_entry->u.command[1] = new_right;
+    temp->u.command[0] = new_entry;
+    // temp->u.command[1] stays the same
+  }
+  s->my_commands[s->next_pos] = temp;
+  // printf("After: \n");
 }
