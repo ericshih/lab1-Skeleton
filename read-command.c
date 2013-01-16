@@ -19,10 +19,10 @@ void end_word(bool* input_flag, bool* output_flag, command_t entry,
 bool analyze_token(char* token); //returns false if token ends with special 
 				 //characters, e.g. a ||
 void output_error(char* buffer, char* token, int pos); 
-
-void reorder_commands(command_stream_t s);
 //outputs error with line number found at token
+command_t reorder_commands(command_t s);
 
+int num_subshells = 0;
 
 struct command_stream
 {
@@ -260,7 +260,7 @@ make_command_stream (int (*get_next_byte) (void *),
 	if(temp!=NULL)
 	{
 		strcat(token,temp);
-        //	printf("%s\n", token);
+        	printf("%s\n", token);
 	}
 	else
 	   output_error(err_buf, token,0);
@@ -303,7 +303,7 @@ command_t process_buffer(char* buf)
 
   while(buf[i]!='\0')
   {
-  //  printf("%d\n", i);
+    printf("%d\n", num_subshells);
   //  printf("%c %d\n",buf[i], i);
     switch(buf[i])
     {
@@ -480,6 +480,7 @@ command_t process_buffer(char* buf)
 	}
 	case '(': 
 	{
+//		num_subshells++;
 		if(subshell_flag)
 		{
 			depth++;
@@ -525,7 +526,15 @@ command_t process_buffer(char* buf)
 		}
 		else
 		{
-			end_word(&input_flag, &output_flag, entry, 
+/*		num_subshells--;
+		if(num_subshells < 0) // Check for more right parentheses than 
+				      // left parentheses
+		{
+			printf("here %d\n", num_subshells);
+			entry->status = -2-i;
+			return entry;
+		}
+*/			end_word(&input_flag, &output_flag, entry, 
 				subset, &word_count);
 		  	if(entry->status != -1)
 			{
@@ -549,6 +558,11 @@ command_t process_buffer(char* buf)
 		   //error(1,0,"%d : Syntax Error <", line);
  			
 		end_word(&input_flag, &output_flag, entry, subset, &word_count);
+		if(entry->status != -1)
+		{
+		   entry->status = -2-i;
+		   return entry;
+		}
 		input_flag = true;
 		i++;	
 		break;
@@ -564,8 +578,12 @@ command_t process_buffer(char* buf)
 		{
 		   entry->status = -2-i;
 		   return entry;
+		}
+		if(entry->status != -1)
+		{
+		   entry->status = -2-i;
+		   return entry;
 		}   
- 		
 		end_word(&input_flag, &output_flag, entry, subset, &word_count);
 		output_flag = true;
 		i++;	
@@ -645,27 +663,52 @@ void end_word(bool* input_flag, bool* output_flag, command_t entry,
 
 command_t read_command_stream (command_stream_t s)
 {
+  command_t temp;
   if(s->next_pos == s->size)
     return NULL;
   else if(s->my_commands[s->next_pos]->type != SIMPLE_COMMAND)
-    reorder_commands(s);
-  command_t temp = s->my_commands[s->next_pos];
+  {
+    temp = reorder_commands(s->my_commands[s->next_pos]);
+    s->next_pos++;
+    return temp;
+  }
+  temp = s->my_commands[s->next_pos];
   s->next_pos++;
   return temp;
 }
 
-void reorder_commands(command_stream_t s)
+command_t reorder_commands(command_t s)
 {
   // Reorder tree
-  command_t temp = s->my_commands[s->next_pos];
-  // printf("Before: \n");
-  // print_command(temp);
+  command_t temp = s;
+   //printf("Before: \n");
+   //print_command(temp);
 
   // while
   while(temp->u.command[1] != NULL && temp->u.command[1]->type != SIMPLE_COMMAND)
   {
+    
+    // CHECK PRECEDENCE, DON'T CHANGE TREE IF RIGHT SIDE HAS HIGHER PRECEDENCE
+    // THAN ITS HEAD
+    // FIX TONIGHT!!!
+   if(temp->u.command[1]->type == PIPE_COMMAND && 
+	(temp->type == OR_COMMAND || temp->type == AND_COMMAND))
+    {
+	if(temp->u.command[1]->u.command[1]->type != SIMPLE_COMMAND)
+	{	
+	//	printf("recursion\n");
+		temp->u.command[1] = 
+			reorder_commands(temp->u.command[1]);
+	
+	//printf("reordered command:\n");	
+	//print_command(temp->u.command[1]);
+        }
+	else
+	   break;	
+    }
+
     command_t new_right = temp->u.command[1]->u.command[0]; 
-    command_t new_left = temp->u.command[0];
+//command_t new_left = temp->u.command[0];
     command_t new_entry = temp;
     temp = temp->u.command[1];
     // new_entry->u.command[0] = new_left;
@@ -673,6 +716,6 @@ void reorder_commands(command_stream_t s)
     temp->u.command[0] = new_entry;
     // temp->u.command[1] stays the same
   }
-  s->my_commands[s->next_pos] = temp;
-  // printf("After: \n");
+  return temp;
+  //printf("After: \n");
 }
