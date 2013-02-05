@@ -719,3 +719,5 @@ command_t reorder_commands(command_t s)
   return temp;
   //printf("After: \n");
 }
+
+// check for fork
